@@ -412,6 +412,8 @@ class App(ctk.CTk):
                      ).pack(side="left", padx=22, pady=14)
         ctk.CTkLabel(head, text=LANGUAGE_MODEL.split("/")[-1], text_color="#5b6280",
                      font=ctk.CTkFont(size=11)).pack(side="right", padx=22)
+        ctk.CTkButton(head, text="⚡ Agent", width=90, height=32, corner_radius=16,
+                      command=self.open_agent).pack(side="right", padx=(0, 6), pady=13)
 
         self.chat = ctk.CTkScrollableFrame(main, fg_color=C_MAIN)
         self.chat.grid(row=1, column=0, sticky="nsew")
@@ -443,6 +445,17 @@ class App(ctk.CTk):
     def scroll_bottom(self):
         self.update_idletasks()
         self.chat._parent_canvas.yview_moveto(1.0)
+
+    def open_agent(self):
+        # don't open a second window if the agent is already running
+        proc = getattr(self, "agent_proc", None)
+        if proc and proc.poll() is None:
+            return
+        script = Path(__file__).with_name("eiva_agent.py")
+        if not script.exists():
+            self.status.configure(text="✗ eiva_agent.py not found")
+            return
+        self.agent_proc = subprocess.Popen([sys.executable, str(script)])
 
     def show_article(self, path: Path):
         try:
