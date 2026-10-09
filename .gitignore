@@ -1,0 +1,5 @@
+articles/
+urls.txt
+.eiva_cache.json
+.env/
+__pycache__/
