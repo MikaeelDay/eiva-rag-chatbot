@@ -11,18 +11,43 @@ Run:      python eiva_agent.py
 import queue
 import re
 import threading
-
+import os
 import customtkinter as ctk
 import ollama
-from AppOpener import open as open_app   # renamed so it doesn't shadow Python's built-in open()
+from AppOpener import open as open_app  # renamed so it doesn't shadow Python's built-in open()
 
 LANGUAGE_MODEL = "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF"
 
 SYSTEM_PROMPT = (
-    "You extract the application name from the user's command.\n"
-    "Reply with ONLY the application name, in lowercase English letters.\n"
-    "No punctuation, no explanation, no extra words.\n"
-    "If the command does not mention an application, reply with exactly: none"
+    """
+    You are an intent classification system for a desktop assistant.
+
+Your task is to identify the user's intent and extract its target.
+
+Supported intents:
+- open_app: Open a desktop application.
+- play_music: Play a song or music.
+- search_google: Search for information on Google.
+- unknown: The command does not match a supported intent.
+
+Return only valid JSON with these fields:
+- intent
+- target
+
+Examples:
+
+User: open telegram
+Output: {"intent": "open_app", "target": "telegram"}
+
+User: play music
+Output: {"intent": "play_music", "target": "music"}
+
+User: search about sports
+Output: {"intent": "search_google", "target": "sports"}
+
+User: سلام، خوبی؟
+Output: {"intent": "unknown", "target": "none"}
+    """
 )
 
 # Few-shot examples: a small model follows examples much better than rules.
@@ -35,6 +60,13 @@ EXAMPLES = [
     ("please start visual studio code", "visual studio code"),
     ("what's the weather today", "none"),
     ("سلام حالت چطوره", "none"),
+    ("open telegram", '{"intent": "open_app", "target": "telegram"}'),
+    ("برنامه تلگرام رو باز کن", '{"intent": "open_app", "target": "telegram"}'),
+    ("play music", '{"intent": "play_music", "target": "music"}'),
+    ("play despacito", '{"intent": "play_music", "target": "despacito"}'),
+    ("search about sports", '{"intent": "search_google", "target": "sports"}'),
+    ("search python tutorials", '{"intent": "search_google", "target": "python tutorials"}'),
+    ("سلام حالت چطوره", '{"intent": "unknown", "target": "none"}'),
 ]
 
 
@@ -42,23 +74,54 @@ def clean_output(text: str) -> str:
     """Keep only a short, lowercase app name, whatever extra text the model adds."""
     first_line = text.strip().splitlines()[0] if text.strip() else ""
     name = re.sub(r"[^a-z0-9 .+#-]", "", first_line.lower()).strip()
-    name = " ".join(name.split()[:4])   # app names are at most a few words
+    name = " ".join(name.split()[:4])  # app names are at most a few words
     return name or "none"
 
 
-def extract_app_name(command: str) -> str:
+def extract_intent(command: str) -> dict:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
     for user_text, answer in EXAMPLES:
         messages.append({"role": "user", "content": user_text})
         messages.append({"role": "assistant", "content": answer})
+
     messages.append({"role": "user", "content": command})
 
     response = ollama.chat(
         model=LANGUAGE_MODEL,
         messages=messages,
-        options={"temperature": 0, "num_predict": 12},  # deterministic and short
+        options={"temperature": 0, "num_predict": 50},
     )
-    return clean_output(response["message"]["content"])
+
+    try:
+        result = response["message"]["content"]
+        match = re.search(r"\{.*?\}", result, re.DOTALL)
+
+        if not match:
+            return {"intent": "unknown", "target": "none"}
+
+        data = __import__("json").loads(match.group())
+
+        allowed_intents = {
+            "open_app",
+            "play_music",
+            "search_google",
+            "unknown",
+        }
+
+        intent = data.get("intent", "unknown")
+        target = str(data.get("target", "none")).strip()
+
+        if intent not in allowed_intents:
+            return {"intent": "unknown", "target": "none"}
+
+        if not target:
+            target = "none"
+
+        return {"intent": intent, "target": target}
+
+    except (ValueError, TypeError, AttributeError):
+        return {"intent": "unknown", "target": "none"}
 
 
 class AgentWindow(ctk.CTk):
@@ -103,17 +166,53 @@ class AgentWindow(ctk.CTk):
     def _work(self, command: str):
         """Runs in a background thread so the window never freezes."""
         try:
-            name = extract_app_name(command)       # one LLM call only
-            if name == "none":
-                self.events.put(("status", "I couldn't find an app name in that command."))
+            result = extract_intent(command)
+
+            intent = result["intent"]
+            target = result["target"]
+
+            print(f"Command: {command}")
+            print(f"Intent: {intent}")
+            print(f"Target: {target}")
+            print("-" * 30)
+
+            if intent == "unknown":
+                self.events.put(
+                    ("status", "I couldn't recognize that command.")
+                )
                 return
-            self.events.put(("status", f"Opening {name}…"))
-            open_app(name, match_closest=True, output=False, throw_error=True)
-            self.events.put(("status", f"✓ {name}"))
+
+            if intent == "open_app":
+                self.events.put(("status", f"Opening {target}..."))
+
+                open_app(
+                    target,
+                    match_closest=True,
+                    output=False,
+                    throw_error=True,
+                )
+
+                self.events.put(("status", f"✓ Opened {target}"))
+
+            elif intent == "play_music":
+                self.events.put(
+                    ("status", f"Recognized: Playing music - {target}")
+                )
+                os.system(f'python eiva_music.py {target}')
+
+
+            elif intent == "search_google":
+                self.events.put(
+                    ("status", f"Recognized: Searching Google - {target}"),
+                )
+                os.system(f'python eiva_search.py {target}')
+
         except (ollama.ResponseError, ConnectionError) as e:
             self.events.put(("status", f"Ollama error: {e}"))
-        except Exception as e:  # thread boundary: AppOpener raises when the app isn't found
-            self.events.put(("status", f"✗ Couldn't open the app: {e}"))
+
+        except Exception as e:
+            self.events.put(("status", f"✗ Error: {e}"))
+
         finally:
             self.events.put(("idle", None))
 
