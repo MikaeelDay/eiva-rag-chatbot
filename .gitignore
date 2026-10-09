@@ -3,3 +3,4 @@ urls.txt
 .eiva_cache.json
 .env/
 __pycache__/
+.idea/
