@@ -17,7 +17,8 @@ import threading
 import tkinter as tk
 from dataclasses import dataclass, asdict
 from pathlib import Path
-
+import subprocess
+import sys
 import customtkinter as ctk
 import numpy as np
 import ollama

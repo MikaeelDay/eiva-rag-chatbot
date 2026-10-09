@@ -1,14 +1,20 @@
 """
-Eiva agent - step 1: turn a command into an app name.
+Eiva Agent - a tiny window: type a command, the LLM extracts the app name,
+and the app is opened.
 
-    "open telegram app"             ->  telegram
-    "برنامه تلگرام رو برام باز کن"     ->  telegram
+    "open telegram app"             ->  telegram  ->  opens Telegram
+    "برنامه تلگرام رو برام باز کن"     ->  telegram  ->  opens Telegram
 
-Run:  python eiva_agent.py      (type q to quit)
+Install:  pip install customtkinter ollama AppOpener
+Run:      python eiva_agent.py
 """
+import queue
 import re
-from AppOpener import open
+import threading
+
+import customtkinter as ctk
 import ollama
+from AppOpener import open as open_app   # renamed so it doesn't shadow Python's built-in open()
 
 LANGUAGE_MODEL = "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF"
 
@@ -55,19 +61,76 @@ def extract_app_name(command: str) -> str:
     return clean_output(response["message"]["content"])
 
 
-def main():
-    while True:
-        command = input("\nCommand: ").strip()
-        if command.lower() == "q":
-            break
-        if not command:
-            continue
+class AgentWindow(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
+        self.title("Eiva Agent")
+        self.geometry("460x240")
+        self.resizable(False, False)
+
+        self.events: queue.Queue = queue.Queue()
+
+        ctk.CTkLabel(self, text="⚡  Eiva Agent", font=ctk.CTkFont(size=20, weight="bold")
+                     ).pack(anchor="w", padx=22, pady=(18, 0))
+        ctk.CTkLabel(self, text="Tell me which app to open.", text_color="#8a8fa3",
+                     font=ctk.CTkFont(size=12)).pack(anchor="w", padx=22)
+
+        self.entry = ctk.CTkEntry(self, height=44, corner_radius=22, font=ctk.CTkFont(size=14),
+                                  placeholder_text="e.g. open telegram")
+        self.entry.pack(fill="x", padx=22, pady=(16, 8))
+        self.entry.bind("<Return>", lambda e: self.run())
+        self.entry.focus()
+
+        self.button = ctk.CTkButton(self, text="Run", height=40, corner_radius=20, command=self.run)
+        self.button.pack(fill="x", padx=22)
+
+        self.status = ctk.CTkLabel(self, text="", text_color="#8a8fa3", wraplength=410,
+                                   justify="left", font=ctk.CTkFont(size=12))
+        self.status.pack(anchor="w", padx=22, pady=12)
+
+        self.after(50, self._poll)
+
+    def run(self):
+        command = self.entry.get().strip()
+        if not command or self.button.cget("state") == "disabled":
+            return
+        self.button.configure(state="disabled")
+        self.status.configure(text="Thinking…")
+        threading.Thread(target=self._work, args=(command,), daemon=True).start()
+
+    def _work(self, command: str):
+        """Runs in a background thread so the window never freezes."""
         try:
-            print(extract_app_name(command))
-            open(extract_app_name(command))
+            name = extract_app_name(command)       # one LLM call only
+            if name == "none":
+                self.events.put(("status", "I couldn't find an app name in that command."))
+                return
+            self.events.put(("status", f"Opening {name}…"))
+            open_app(name, match_closest=True, output=False, throw_error=True)
+            self.events.put(("status", f"✓ {name}"))
         except (ollama.ResponseError, ConnectionError) as e:
-            print(f"Ollama error: {e}")
+            self.events.put(("status", f"Ollama error: {e}"))
+        except Exception as e:  # thread boundary: AppOpener raises when the app isn't found
+            self.events.put(("status", f"✗ Couldn't open the app: {e}"))
+        finally:
+            self.events.put(("idle", None))
+
+    def _poll(self):
+        try:
+            while True:
+                kind, value = self.events.get_nowait()
+                if kind == "status":
+                    self.status.configure(text=value)
+                elif kind == "idle":
+                    self.button.configure(state="normal")
+                    self.entry.delete(0, "end")
+                    self.entry.focus()
+        except queue.Empty:
+            pass
+        self.after(50, self._poll)
 
 
 if __name__ == "__main__":
-    main()
+    AgentWindow().mainloop()
