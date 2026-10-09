@@ -8,6 +8,7 @@ and the app is opened.
 Install:  pip install customtkinter ollama AppOpener
 Run:      python eiva_agent.py
 """
+import speech_recognition as sr
 import queue
 import re
 import threading
@@ -17,6 +18,7 @@ import ollama
 from AppOpener import open as open_app  # renamed so it doesn't shadow Python's built-in open()
 
 LANGUAGE_MODEL = "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF"
+SPEECH_LANGUAGE = "en-US"
 
 SYSTEM_PROMPT = (
     """
@@ -130,7 +132,7 @@ class AgentWindow(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.title("Eiva Agent")
-        self.geometry("460x240")
+        self.geometry("460x260")
         self.resizable(False, False)
 
         self.events: queue.Queue = queue.Queue()
@@ -146,14 +148,62 @@ class AgentWindow(ctk.CTk):
         self.entry.bind("<Return>", lambda e: self.run())
         self.entry.focus()
 
-        self.button = ctk.CTkButton(self, text="Run", height=40, corner_radius=20, command=self.run)
-        self.button.pack(fill="x", padx=22)
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=22)
+        btn_row.grid_columnconfigure(0, weight=1)
+
+        self.button = ctk.CTkButton(btn_row, text="Run", height=40, corner_radius=20,
+                                    command=self.run)
+        self.button.grid(row=0, column=0, sticky="ew")
+
+        self.mic_button = ctk.CTkButton(btn_row, text="🎤", width=56, height=40, corner_radius=20,
+                                        command=self.start_listening)
+        self.mic_button.grid(row=0, column=1, padx=(8, 0))
 
         self.status = ctk.CTkLabel(self, text="", text_color="#8a8fa3", wraplength=410,
                                    justify="left", font=ctk.CTkFont(size=12))
         self.status.pack(anchor="w", padx=22, pady=12)
 
         self.after(50, self._poll)
+
+    def eiva_talk(self):
+        """یک بار گوش می‌دهد و متن را برمی‌گرداند (یا None)."""
+        r = sr.Recognizer()
+        try:
+            with sr.Microphone() as source:
+                self.events.put(("status", "🎤 Listening..."))
+                r.adjust_for_ambient_noise(source, duration=0.3)
+                audio = r.listen(source, timeout=8, phrase_time_limit=15)
+
+            self.events.put(("status", "Recognizing..."))
+            text = r.recognize_google(audio, language=SPEECH_LANGUAGE).lower()
+            self.events.put(("status", f"Heard: {text}"))
+            return text
+
+        except sr.WaitTimeoutError:
+            self.events.put(("status", "I didn't hear anything."))
+        except sr.UnknownValueError:
+            self.events.put(("status", "Could not understand the audio."))
+        except sr.RequestError as e:
+            self.events.put(("status", f"Speech service error: {e}"))
+        except Exception as e:
+            self.events.put(("status", f"Microphone error: {e}"))
+        return None
+
+    def start_listening(self):
+        if self.mic_button.cget("state") == "disabled":
+            return
+        self.mic_button.configure(state="disabled")
+        threading.Thread(target=self._listen_work, daemon=True).start()
+
+    def _listen_work(self):
+        try:
+            text = self.eiva_talk()
+            if text:
+                self.events.put(("text", text))
+                self.events.put(("auto_run", None))
+        finally:
+            self.events.put(("listen_idle", None))
 
     def run(self):
         command = self.entry.get().strip()
@@ -222,6 +272,14 @@ class AgentWindow(ctk.CTk):
                 kind, value = self.events.get_nowait()
                 if kind == "status":
                     self.status.configure(text=value)
+                elif kind == "text":
+                    self.entry.delete(0, "end")
+                    self.entry.insert(0, value)
+                    self.entry.focus()
+                elif kind == "auto_run":
+                    self.run()
+                elif kind == "listen_idle":
+                    self.mic_button.configure(state="normal")
                 elif kind == "idle":
                     self.button.configure(state="normal")
                     self.entry.delete(0, "end")
