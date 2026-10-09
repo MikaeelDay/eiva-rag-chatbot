@@ -147,6 +147,9 @@ The default is a small 1B model, which runs on almost any machine but struggles 
 - Retrieval is purely semantic; adding keyword search (hybrid retrieval) and a re-ranker could improve results.
 - Answer quality depends heavily on the chosen local model.
 - No automated evaluation of retrieval quality yet.
+## Ideas for future
+
+- one of things i personally like to add to eiva is an Agent who can intract with system interface and do small things like open apps or delete files & ... 
 
 ## 📄 Disclaimer
 
@@ -154,5 +157,5 @@ The articles used for development were collected from [mongard.ir](https://www.m
 
 ## 👤 Author
 
-**Mikaeel Raeisi** — Python / Django developer moving toward API development and AI/ML engineering.
+**Mikaeel Raisee** — Python / Django developer moving toward API development and AI/ML engineering.
 GitHub: [@MikaeelDay](https://github.com/MikaeelDay)
