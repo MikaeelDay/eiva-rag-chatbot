@@ -11,6 +11,8 @@ Eiva is a **fully local Retrieval-Augmented Generation (RAG) chatbot** with a de
 ![Eiva screenshot](docs/eiva2.png)
 ![Eiva screenshot](docs/eiva3.png)
 ![Eiva screenshot](docs/eiva4.png)
+## Agent ScreenShot :
+![Eiva screenshot](docs/eiav-agent.png)
 
 ## ✨ Features
  
