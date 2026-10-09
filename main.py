@@ -4,7 +4,7 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
-HEADERS = {"Use r-Agent": "Mozilla/5.0"}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 OUTPUT_DIR = "articles"
 
 
