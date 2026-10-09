@@ -3,3 +3,4 @@ ollama
 numpy
 requests
 beautifulsoup4
+AppOpener
